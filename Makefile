@@ -6,11 +6,11 @@ all:
 
 install-local:
 	@mkdir --parents ${HOME}/.local/${TARGET_DIR}
-	@cp extension.js metadata.json ${HOME}/.local/${TARGET_DIR}
+	@cp extension.js metadata.json stylesheet.css ${HOME}/.local/${TARGET_DIR}
 
 install:
 	@mkdir --parents ${DESTDIR}/usr/share/${TARGET_DIR}
-	@cp extension.js metadata.json ${DESTDIR}/usr/share/${TARGET_DIR}
+	@cp extension.js metadata.json stylesheet.css ${DESTDIR}/usr/share/${TARGET_DIR}
 
 dist:
 	git archive --format=tar --prefix=connman-applet-$(shell git describe)/ HEAD | \
