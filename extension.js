@@ -61,6 +61,19 @@ const CMManagerProxy = DBus.makeProxyClass(CMManagerInterface);
 const CMServiceProxy = DBus.makeProxyClass(CMServiceInterface);
 const CMTechnologyProxy = DBus.makeProxyClass(CMTechnologyInterface);
 
+function getIconForSignal(strength) {
+    if (strength > 80)
+        return 'network-wireless-signal-excellent';
+    else if (strength > 60)
+        return 'network-wireless-signal-good';
+    else if (strength > 40)
+        return 'network-wireless-signal-ok';
+    else if (strength > 20)
+        return 'network-wireless-signal-weak';
+    else
+        return 'network-wireless-signal-none';
+}
+
 function CMService(path, props) {
     this._init(path, props);
 }
@@ -88,7 +101,8 @@ CMService.prototype = {
         this._props = res;
     },
 
-    _propertyChanged: function(name, value) {
+    _propertyChanged: function(value, name) {
+        log('Service property "' + name + '" changed to: ' + value);
         this._props[name] = value;
     },
 
@@ -142,6 +156,14 @@ CMService.prototype = {
     get isRoaming() {
         return this._getProperty('Roaming');
     },
+
+    connect: function() {
+        // set an unusually long timeout because the Connect method
+        // will not return until success or error
+        this._proxy.ConnectRemote({ timeout: 120000 }, Lang.bind(this, function(error) {
+            log('Unable to connect: ' + error);
+        }));
+    },
 };
 
 function CMTechnologyTitleMenuItem(name, technology) {
@@ -158,6 +180,8 @@ CMTechnologyTitleMenuItem.prototype = {
         this._technology = technology;
 
         this._manager = new CMManagerProxy(DBus.system, 'net.connman', '/');
+        this._tech = new CMTechnologyProxy(DBus.system, 'net.connman', '/net/connman/technology/' + this._technology);
+        this._tech.connect('PropertyChanged', Lang.bind(this, this._propertyChanged));
 
         this._description = new St.Label({ text: name,
                                            style_class: 'popup-subtitle-menu-item' });
@@ -172,12 +196,6 @@ CMTechnologyTitleMenuItem.prototype = {
         this.section = new PopupMenu.PopupMenuSection();
 
         this.actor.reactive = true;
-    },
-
-    destroy: function() {
-        this.section.destroy();
-
-        PopupMenu.PopupBaseMenuItem.prototype.destroy.call(this);
     },
 
     setDescription: function(description) {
@@ -205,10 +223,6 @@ CMTechnologyTitleMenuItem.prototype = {
             this.actor.show();
             this.section.actor.show();
         }
-        else {
-            this.actor.hide();
-            this.section.actor.hide();
-        }
     },
 
     activate: function(event) {
@@ -220,15 +234,49 @@ CMTechnologyTitleMenuItem.prototype = {
         PopupMenu.PopupBaseMenuItem.prototype.activate.call(this, event);
     },
 
+    _propertyChanged: function(value, name) {
+        if (name == 'State') {
+            if (value == 'enabled')
+                this._switch.state = true;
+            else
+                this._switch.state = false;
+
+            if (value == 'blocked')
+                this.actor.reactive = false;
+            else
+                this.actor.reactive = true;
+        }
+    },
+
     enableTechnology: function() {
-        this._manager.EnableTechnologyRemote(this._technology);
-        this._switch.setToggleState(true);
+        if (this._switch.state)
+            return;
+
+        this._manager.EnableTechnologyRemote(this._technology, Lang.bind(this, function(error) {
+            if (error) {
+                log('Unable to enable ' + this._technology + ': ' + error);
+                return;
+            }
+
+            this._switch.setToggleState(true);
+        }));
+
         this.section.actor.visible = true;
     },
 
     disableTechnology: function() {
-        this._manager.DisableTechnologyRemote(this._technology);
-        this._switch.setToggleState(false);
+        if (!this._switch.state)
+            return;
+
+        this._manager.DisableTechnologyRemote(this._technology, Lang.bind(this, function(error) {
+            if (error) {
+                log('Unable to disable ' + this._technology + ': ' + error);
+                return;
+            }
+
+            this._switch.setToggleState(false);
+        }));
+
         this.section.actor.visible = false;
     },
 };
@@ -270,8 +318,13 @@ CMWifiTitleMenuItem.prototype = {
             else
                 this.section.addMenuItem(item);
 
+            item.setOnline(isOnline);
             item.updateStrength(service.strength);
             item.updateSecurity(service.security);
+
+            item.connect('activate', Lang.bind(this, function() {
+                service.connect();
+            }));
         }
 
         CMTechnologyTitleMenuItem.prototype.updateServices.call(this, services);
@@ -311,21 +364,12 @@ CMWifiMenuItem.prototype = {
         this._icons.add_actor(this._strength);
     },
 
+    setOnline: function(isOnline) {
+        this.setShowDot(isOnline);
+    },
+
     updateStrength: function(strength) {
-        let icon_name;
-
-        if (strength > 80)
-            icon_name = 'network-wireless-signal-excellent';
-        else if (strength > 60)
-            icon_name = 'network-wireless-signal-good';
-        else if (strength > 40)
-            icon_name = 'network-wireless-signal-ok';
-        else if (strength > 20)
-            icon_name = 'network-wireless-signal-weak';
-        else
-            icon_name = 'network-wireless-signal-none';
-
-        this._strength.icon_name = icon_name;
+        this._strength.icon_name = getIconForSignal(strength);
     },
 
     updateSecurity: function(security) {
@@ -416,11 +460,15 @@ CMApplet.prototype = {
         for (let i = 0; i < technologies.length; i++) {
             let tech = technologies[i];
 
-            if (tech == 'wifi')
+            if (tech == 'wifi') {
+                this._sections.wifi.section.actor.show();
                 this._sections.wifi.item.setToggleState(true);
+            }
 
-            if (tech == 'ethernet')
+            if (tech == 'ethernet') {
+                this._sections.wired.section.actor.show();
                 this._sections.wired.item.setToggleState(true);
+            }
         }
     },
 
@@ -542,11 +590,6 @@ CMApplet.prototype = {
             return;
         }
 
-        if (name == 'OfflineMode') {
-            this._sections.wifi.section.actor.hide();
-            return;
-        }
-
         if (name == 'Services') {
             this._updateServices(value);
             return;
@@ -562,9 +605,10 @@ CMApplet.prototype = {
     _updateIcon: function() {
         if (this._state == 'online') {
             if (this._sections.wired.services) {
-		for (let i = 0; i < this._sections.wired.services.length; i++) {
+                for (let i = 0; i < this._sections.wired.services.length; i++) {
                     let service = this._sections.wired.services[i];
 
+                    // wired connections take over
                     if (service.state == 'online') {
                         this.setIcon('network-wired');
                         return;
@@ -575,11 +619,7 @@ CMApplet.prototype = {
                     let service = this._sections.wifi.services[i];
 
                     if (service.state == 'online') {
-                        if (service.security)
-                            this.setIcon('network-wireless-encrypted');
-                        else
-                            this.setIcon('network-wireless');
-
+                        this.setIcon(getIconForSignal(service.strength));
                         return;
                     }
                 }
