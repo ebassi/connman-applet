@@ -67,11 +67,11 @@ const CMTechnologyProxy = DBus.makeProxyClass(CMTechnologyInterface);
 function getIconForSignal(strength) {
     if (strength > 80)
         return 'network-wireless-signal-excellent';
-    else if (strength > 60)
+    else if (strength > 55)
         return 'network-wireless-signal-good';
-    else if (strength > 40)
+    else if (strength > 30)
         return 'network-wireless-signal-ok';
-    else if (strength > 20)
+    else if (strength > 5)
         return 'network-wireless-signal-weak';
     else
         return 'network-wireless-signal-none';
