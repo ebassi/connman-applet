@@ -40,7 +40,7 @@ const CMServiceInterface = {
         { name: 'GetProperties', inSignature: '', outSignature: 'a{sv}' },
         { name: 'SetProperty', inSignature: 'sv', outSignature: '' },
         { name: 'ClearProperty', inSignature: 's', outSignature: '' },
-        { name: 'Connect', inSignature: '', outSignature: '' },
+        { name: 'Connect', inSignature: '', outSignature: '', timeout: 120000 },
         { name: 'Disconnect', inSignature: '', outSignature: '' },
     ],
     signals: [
@@ -187,7 +187,7 @@ CMService.prototype = {
     connectService: function() {
         // set an unusually long timeout because the Connect method
         // will not return until success or error
-        this._proxy.ConnectRemote({ timeout: 120000 }, Lang.bind(this, function(error) {
+        this._proxy.ConnectRemote(Lang.bind(this, function(error) {
             if (error)
                 log('Unable to connect: ' + error);
             else
