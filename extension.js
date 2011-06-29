@@ -3,6 +3,7 @@ const DBus = imports.dbus;
 const GLib = imports.gi.GLib;
 const Lang = imports.lang;
 const Shell = imports.gi.Shell;
+const Signals = imports.signals;
 const St = imports.gi.St;
 
 // shell imports
@@ -61,6 +62,8 @@ const CMManagerProxy = DBus.makeProxyClass(CMManagerInterface);
 const CMServiceProxy = DBus.makeProxyClass(CMServiceInterface);
 const CMTechnologyProxy = DBus.makeProxyClass(CMTechnologyInterface);
 
+// common code for selecting the icon depending
+// on the signal strength
 function getIconForSignal(strength) {
     if (strength > 80)
         return 'network-wireless-signal-excellent';
@@ -81,11 +84,14 @@ function CMService(path, props) {
 CMService.prototype = {
     _init: function(path, props) {
         this._object_path = path;
+
         this._proxy = new CMServiceProxy(DBus.system, 'net.connman', this._object_path);
 
         if (props)
             this._props = props;
         else {
+            log('Requesting properties for service: ' + this._object_path);
+            this._props = { };
             this._proxy.GetPropertiesRemote(Lang.bind(this, this._updateProperties));
         }
 
@@ -94,27 +100,40 @@ CMService.prototype = {
 
     _updateProperties: function(res, err) {
         if (err) {
-            log('Unable to update properties for service "' + this._object_path);
+            log('Unable to update properties for service "' + this._object_path + '": ' + err);
             return;
         }
 
+        log('Updating properties for service: ' + this._object_path);
         this._props = res;
+        this.emit('changed');
     },
 
-    _propertyChanged: function(value, name) {
+    _propertyChanged: function(emitter, name, value) {
         log('Service property "' + name + '" changed to: ' + value);
         this._props[name] = value;
+        this.emit('changed');
     },
 
     _getProperty: function(name) {
+        if (!this._props)
+            return null;
+
         return this._props[name];
     },
 
     setPassphrase: function(passphrase) {
+        if (!this._props)
+            this._props = { };
+
         // this won't emit the PropertyChange signal so we need to change
         // the _props dict ourselves
         this._props['Passphrase'] = passphrase;
         this._proxt.SetPropertyRemote('Passphrase', this._props['Passphrase']);
+    },
+
+    get path() {
+        return this._object_path;
     },
 
     get type() {
@@ -157,14 +176,35 @@ CMService.prototype = {
         return this._getProperty('Roaming');
     },
 
-    connect: function() {
+    get passphraseRequired() {
+        return this._getProperty('PassphraseRequired');
+    },
+
+    get passphrase() {
+        return this._getProperty('Passphrase');
+    },
+
+    connectService: function() {
         // set an unusually long timeout because the Connect method
         // will not return until success or error
         this._proxy.ConnectRemote({ timeout: 120000 }, Lang.bind(this, function(error) {
-            log('Unable to connect: ' + error);
+            if (error)
+                log('Unable to connect: ' + error);
+            else
+                this.emit('changed');
+        }));
+    },
+
+    disconnectService: function() {
+        this._proxy.DisconnectRemote({ timeout: 120000 }, Lang.bind(this, function(error) {
+            if (error)
+                log('Unable to disconnect: ' + error);
+            else
+                this.emit('changed');
         }));
     },
 };
+Signals.addSignalMethods(CMService.prototype);
 
 function CMTechnologyTitleMenuItem(name, technology) {
     log('Attempting to use the abstract CMTechnologyTitleMenuItem');
@@ -174,7 +214,7 @@ CMTechnologyTitleMenuItem.prototype = {
     __proto__: PopupMenu.PopupBaseMenuItem.prototype,
 
     _init: function(name, technology) {
-	PopupMenu.PopupBaseMenuItem.prototype._init.call(this);
+	    PopupMenu.PopupBaseMenuItem.prototype._init.call(this);
 
         this._name = name;
         this._technology = technology;
@@ -202,39 +242,29 @@ CMTechnologyTitleMenuItem.prototype = {
         this._description.text = description;
     },
 
-    setToggleState: function(is_online) {
-        this._switch.setToggleState(is_online);
+    setToggleState: function(is_enabled) {
+        this._switch.setToggleState(is_enabled);
+    },
+
+    addServiceItem: function(item, overflow) {
+        if (overflow) {
+            log('Adding overflow sub-menu for ' + this._description.text);
+            if (!this._overflowMenu) {
+                this._overflowMenu = new PopupMenu.PopupSubMenuMenuItem(_("More..."));
+                this.section.addMenuItem(this._overflowMenu);
+            }
+            this._overflowMenu.menu.addMenuItem(item);
+        }
+        else {
+            this.section.addMenuItem(item);
+        }
     },
 
     get state() {
         return this._switch.state;
     },
 
-    clearServices: function() {
-        this._services.removeAll();
-    },
-
-    updateServices: function(services) {
-        this._services = services;
-
-        log('Services: ' + this._services.length);
-
-        if (this._services.length > 0) {
-            this.actor.show();
-            this.section.actor.show();
-        }
-    },
-
-    activate: function(event) {
-        if (this._switch.actor.mapped) {
-            this._switch.toggle();
-            this.emit('toggled', this._switch.state);
-        }
-
-        PopupMenu.PopupBaseMenuItem.prototype.activate.call(this, event);
-    },
-
-    _propertyChanged: function(value, name) {
+    _propertyChanged: function(emitter, name, value) {
         if (name == 'State') {
             if (value == 'enabled')
                 this._switch.state = true;
@@ -249,35 +279,123 @@ CMTechnologyTitleMenuItem.prototype = {
     },
 
     enableTechnology: function() {
-        if (this._switch.state)
-            return;
-
         this._manager.EnableTechnologyRemote(this._technology, Lang.bind(this, function(error) {
             if (error) {
                 log('Unable to enable ' + this._technology + ': ' + error);
                 return;
             }
-
-            this._switch.setToggleState(true);
         }));
-
-        this.section.actor.visible = true;
     },
 
     disableTechnology: function() {
-        if (!this._switch.state)
-            return;
-
         this._manager.DisableTechnologyRemote(this._technology, Lang.bind(this, function(error) {
             if (error) {
                 log('Unable to disable ' + this._technology + ': ' + error);
                 return;
             }
-
-            this._switch.setToggleState(false);
         }));
+    },
 
-        this.section.actor.visible = false;
+    activate: function(event) {
+        if (this._switch.actor.mapped) {
+            this._switch.toggle();
+            this.emit('toggled', this._switch.state);
+        }
+
+        if (this.state)
+            this.enableTechnology();
+        else
+            this.disableTechnology();
+
+        PopupMenu.PopupBaseMenuItem.prototype.activate.call(this, event);
+    },
+};
+
+function CMServiceMenuItem(service) {
+    this._init(service);
+}
+
+CMServiceMenuItem.prototype = {
+    __proto__: PopupMenu.PopupBaseMenuItem.prototype,
+
+    _init: function(service) {
+        PopupMenu.PopupBaseMenuItem.prototype._init.call(this);
+
+        this.service = service;
+        this.serviceChangedId = this.service.connect('changed', Lang.bind(this, this._serviceChanged));
+
+        this._name = new St.Label({ text: service.name });
+        this.addActor(this._name);
+
+        this._icons = new St.BoxLayout({ style_class: 'cw-menu-item-icons' });
+        this.addActor(this._icons, { align: St.Align.END });
+
+        this._security = new St.Icon({ style_class: 'popup-menu-icon' });
+        this._icons.add_actor(this._security);
+
+        this._strength = new St.Icon({ icon_name: 'network-wireless-signal-none',
+                                       style_class: 'popup-menu-icon' });
+        this._icons.add_actor(this._strength);
+
+        this.setDescription(this.service.name);
+        this.setOnline(this.service.state == 'online');
+        this.updateStrength(this.service.strength);
+        this.updateSecurity(this.service.security);
+
+        this._icons.visible = this.service.type == 'wifi' ? true : false;
+    },
+
+    setDescription: function(description) {
+        this._name.text = description;
+    },
+
+    setOnline: function(isOnline) {
+        this.setShowDot(isOnline);
+    },
+
+    updateStrength: function(strength) {
+        this._strength.icon_name = getIconForSignal(strength);
+    },
+
+    updateSecurity: function(security) {
+        let icon_name = 'network-wireless-encrypted';
+
+        for (let i = 0; i < security.length; i++) {
+            let sec = security[i];
+
+            if (sec == 'none') {
+                icon_name = '';
+            }
+        }
+
+        this._security.icon_name = icon_name;
+    },
+
+    _serviceChanged: function() {
+        if (service.type == 'online')
+            this._icons.visible = true;
+        else
+            this._icons.visible = false;
+
+        this.setOnline(this.service.state == 'online' ? true : false);
+        this.setDescription(this.service.name);
+        this.updateStrength(this.service.strength);
+        this.updateSecurity(this.service.security);
+    },
+
+    activate: function(event) {
+        this.service.connectService();
+
+        PopupMenu.PopupBaseMenuItem.prototype.activate.call(this, event);
+    },
+
+    destroy: function() {
+        if (this.serviceChangedId) {
+            this.service.disconnect(this.serviceChangedId);
+            this.serviceChangedId = 0;
+        }
+
+        PopupMenu.PopupBaseMenuItem.prototype.destroy.call(this);
     },
 };
 
@@ -296,95 +414,6 @@ function CMWifiTitleMenuItem() {
 CMWifiTitleMenuItem.prototype = {
     __proto__: CMTechnologyTitleMenuItem.prototype,
 
-    updateServices: function(services) {
-        services.sort(function (one, two) {
-            return two.strength - one.strength;
-        });
-
-        for (let i = 0; i < services.length; i++) {
-            let service = services[i];
-            let isOnline = service.state == 'online' ? true : false;
-
-            let item = new CMWifiMenuItem(service.name);
-
-            if (i >= N_VISIBLE_NETWORKS) {
-                if (!this._overflowMenu) {
-                    this._overflowMenu = new PopupMenu.PopupSubMenuMenuItem(_("More..."));
-                    this.section.addMenuItem(this._overflowMenu);
-                }
-
-                this._overflowMenu.menu.addMenuItem(item);
-            }
-            else
-                this.section.addMenuItem(item);
-
-            item.setOnline(isOnline);
-            item.updateStrength(service.strength);
-            item.updateSecurity(service.security);
-
-            item.connect('activate', Lang.bind(this, function() {
-                service.connect();
-            }));
-        }
-
-        CMTechnologyTitleMenuItem.prototype.updateServices.call(this, services);
-    },
-
-    activate: function(event) {
-        CMTechnologyTitleMenuItem.prototype.activate.call(this, event);
-
-        if (this.state)
-            this.enableTechnology();
-        else
-            this.disableTechnology();
-    },
-};
-
-function CMWifiMenuItem(name) {
-    this._init(name);
-}
-
-CMWifiMenuItem.prototype = {
-    __proto__: PopupMenu.PopupBaseMenuItem.prototype,
-
-    _init: function(name) {
-        PopupMenu.PopupBaseMenuItem.prototype._init.call(this);
-
-        this._name = new St.Label({ text: name });
-        this.addActor(this._name);
-
-        this._icons = new St.BoxLayout({ style_class: 'cw-menu-item-icons' });
-        this.addActor(this._icons, { align: St.Align.END });
-
-        this._security = new St.Icon({ style_class: 'popup-menu-icon' });
-        this._icons.add_actor(this._security);
-
-        this._strength = new St.Icon({ icon_name: 'network-wireless-signal-none',
-                                       style_class: 'popup-menu-icon' });
-        this._icons.add_actor(this._strength);
-    },
-
-    setOnline: function(isOnline) {
-        this.setShowDot(isOnline);
-    },
-
-    updateStrength: function(strength) {
-        this._strength.icon_name = getIconForSignal(strength);
-    },
-
-    updateSecurity: function(security) {
-        let icon_name = 'network-wireless-encrypted';
-
-        for (let i = 0; i < security.length; i++) {
-            let sec = security[i];
-
-            if (sec == 'none') {
-                icon_name = 'network-wireless';
-            }
-        }
-
-        this._security.icon_name = icon_name;
-    },
 };
 
 function CMApplet() {
@@ -399,24 +428,29 @@ CMApplet.prototype = {
 
         this._connman_proxy = new CMManagerProxy(DBus.system, 'net.connman', '/');
 
-        this._services = [];
+        // the various sections of the menu
+        this._sections = { };
 
-        this._sections = {};
-
+        // Wired
         this._sections.wired = {
             section: new PopupMenu.PopupMenuSection(),
             item: new CMWiredTitleMenuItem(),
             services: [],
+            available: false,
+            enabled: false,
         };
         this._sections.wired.section.addMenuItem(this._sections.wired.item);
 	    this._sections.wired.section.addMenuItem(this._sections.wired.item.section);
         this._sections.wired.section.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this.menu.addMenuItem(this._sections.wired.section);
 
+        // Wifi
         this._sections.wifi = {
             section: new PopupMenu.PopupMenuSection(),
             item: new CMWifiTitleMenuItem(),
             services: [],
+            available: false,
+            enabled: false,
         };
         this._sections.wifi.section.addMenuItem(this._sections.wifi.item);
 	    this._sections.wifi.section.addMenuItem(this._sections.wifi.item.section);
@@ -439,79 +473,48 @@ CMApplet.prototype = {
     },
 
     _updateAvailableTechnologies: function(technologies) {
-        this._sections.wifi.section.actor.hide();
-        this._sections.wired.section.actor.hide();
+        this._sections.wired.available = false;
+        this._sections.wifi.available = false;
 
         for (let i = 0; i < technologies.length; i++) {
             let tech = technologies[i];
 
-            if (tech == 'wifi')
-                this._sections.wifi.section.actor.show();
+            if (tech == 'ethernet') {
+                this._sections.wired.available = true;
+            }
 
-            if (tech == 'ethernet')
-                this._sections.wired.section.actor.show();
+            if (tech == 'wifi') {
+                this._sections.wifi.available = true;
+            }
         }
+
+        this._sections.wired.section.actor.visible = this._sections.wired.available;
+        this._sections.wifi.section.actor.visible = this._sections.wifi.available;
     },
 
     _updateEnabledTechnologies: function(technologies) {
-        this._sections.wired.item.setToggleState(false);
-        this._sections.wifi.item.setToggleState(false);
+        this._sections.wired.enabled = false;
+        this._sections.wifi.enabled = false;
 
         for (let i = 0; i < technologies.length; i++) {
             let tech = technologies[i];
 
-            if (tech == 'wifi') {
-                this._sections.wifi.section.actor.show();
-                this._sections.wifi.item.setToggleState(true);
-            }
-
             if (tech == 'ethernet') {
-                this._sections.wired.section.actor.show();
-                this._sections.wired.item.setToggleState(true);
-            }
-        }
-    },
-
-    _updateServices: function(services) {
-        this._sections.wired.section.removeAll();
-        this._sections.wired.services = [];
-        this._sections.wired.item = null;
-
-        this._sections.wifi.section.removeAll();
-        this._sections.wifi.services = [];
-        this._sections.wifi.item = null;
-
-        for (let i = 0; i < services.length; i++) {
-            log('Service ' + i + ': ' + res[i]);
-            let [objPath, objProps] = services[i];
-
-            let service = new CMService(objPath, objProps);
-
-            if (service.type == 'ethernet') {
-                this._sections.wired.services.push(service);
+                this._sections.wired.enabled = true;
             }
 
-            if (service.type == 'wifi') {
-                this._sections.wifi.services.push(service);
+            if (tech == 'wifi') {
+                this._sections.wifi.enabled = true;
             }
         }
 
-        this._sections.wired.item = new CMWiredTitleMenuItem();
-        this._sections.wired.section.addMenuItem(this._sections.wired.item);
-	    this._sections.wired.section.addMenuItem(this._sections.wired.item.section);
-        this._sections.wired.section.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._sections.wired.item.updateServices(this._sections.wired.services);
-
-        this._sections.wifi.item = new CMWifiTitleMenuItem();
-        this._sections.wifi.section.addMenuItem(this._sections.wifi.item);
-        this._sections.wifi.section.addMenuItem(this._sections.wifi.item.section);
-        this._sections.wifi.section.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._sections.wifi.item.updateServices(this._sections.wifi.services);
+        this._sections.wired.item.setToggleState(this._sections.wired.enabled);
+        this._sections.wifi.item.setToggleState(this._sections.wifi.enabled);
     },
 
     _getProperties: function(res, err) {
         if (err) {
-            log('Error:    ' + err);
+            log('Unable to get net.connman.Manager properties: ' + err);
             return;
         }
 
@@ -526,39 +529,67 @@ CMApplet.prototype = {
 
             this._updateEnabledTechnologies(enabledTech);
         }
-
-        if (res['State']) {
-            this._state = res['State'];
-        }
-
-        this._updateIcon();
     },
 
     _getServices: function(res, err) {
-        if (err)
-            log('Error:    ' + err);
+        if (err) {
+            log('Unable to get services: ' + err);
+        }
+        else if (res) {
+            this._sections.wired.item.section.removeAll();
+            this._sections.wifi.item.section.removeAll();
 
-        if (res) {
-            //this._sections.wired.section.clearServices();
-            //this._sections.wifi.section.clearServices();
+            this._sections.wired.services = [ ];
+            this._sections.wifi.services = [ ];
 
             for (let i = 0; i < res.length; i++) {
-                log('Service ' + i + ': ' + res[i]);
                 let [objPath, objProps] = res[i];
+                let obj = {
+                    path: objPath,
+                    service: new CMService(objPath, objProps),
+                    item: null,
+                };
 
-                let service = new CMService(objPath, objProps);
+                obj.item = new CMServiceMenuItem(obj.service);
 
-                if (service.type == 'ethernet') {
-                    this._sections.wired.services.push(service);
+                if (obj.service.type == 'wired') {
+                    log('Adding "' + obj.service.name + '" to the wired services');
+                    this._sections.wired.services.push(obj);
                 }
 
-                if (service.type == 'wifi') {
-                    this._sections.wifi.services.push(service);
+                if (obj.service.type == 'wifi') {
+                    log('Adding "' + obj.service.name + '" to the wifi services');
+                    this._sections.wifi.services.push(obj);
                 }
             }
 
-            this._sections.wired.item.updateServices(this._sections.wired.services);
-            this._sections.wifi.item.updateServices(this._sections.wifi.services);
+            if (this._sections.wired.services) {
+                for (let i = 0; i < this._sections.wired.services.length; i++) {
+                    let obj = this._sections.wired.services[i];
+
+                    this._sections.wired.item.addServiceItem(obj.item);
+                }
+
+                if (this._sections.wired.services.length > 1)
+                    this._sections.wired.item.section.actor.show();
+                else
+                    this._sections.wired.item.section.actor.hide();
+            }
+
+            if (this._sections.wifi.services) {
+                this._sections.wifi.services.sort(function(one, two) {
+                    return two.service.strength - one.service.strength;
+                });
+
+                for (let i = 0; i < this._sections.wifi.services.length; i++) {
+                    let obj = this._sections.wifi.services[i];
+
+                    if (i > N_VISIBLE_NETWORKS)
+                        this._sections.wifi.item.addServiceItem(obj.item, true);
+                    else
+                        this._sections.wifi.item.addServiceItem(obj.item, false);
+                }
+            }
         }
 
         this._updateIcon();
@@ -566,36 +597,35 @@ CMApplet.prototype = {
 
     _getState: function(new_state, err) {
         if (err) {
-            log('Error: ' + err);
+            log('Unable to get net.connman.Manager state: ' + err);
             return;
         }
 
+        log('New state (GetState): ' + new_state);
         this._state = new_state;
         this._updateIcon();
     },
 
-    _clearServices: function() {
-    },
-
-    _propertyChanged: function(value, name) {
+    _propertyChanged: function(emitter, name, value) {
         log('Manager property "' + name + '" changed to: ' + value);
 
         if (name == 'AvailableTechnologies') {
             this._updateAvailableTechnologies(value);
-            return;
         }
 
         if (name == 'EnabledTechnologies') {
             this._updateEnabledTechnologies(value);
-            return;
         }
 
         if (name == 'Services') {
-            this._updateServices(value);
-            return;
+            // XXX - this hateful piece of code is here because getting the
+            // Services property only gives you an array of object paths,
+            // so we need to re-request the list of services
+            this._connman_proxy.GetServicesRemote(Lang.bind(this, this._getServices));
         }
 
         if (name == 'State') {
+            log('New state (PropertyChanged): ' + value);
             this._state = value;
         }
 
@@ -605,21 +635,24 @@ CMApplet.prototype = {
     _updateIcon: function() {
         if (this._state == 'online') {
             if (this._sections.wired.services) {
+                // online wired connections always win
                 for (let i = 0; i < this._sections.wired.services.length; i++) {
-                    let service = this._sections.wired.services[i];
+                    let obj = this._sections.wired.services[i];
 
-                    // wired connections take over
-                    if (service.state == 'online') {
+                    if (obj.service.state == 'online') {
+                        log('online wired network');
                         this.setIcon('network-wired');
                         return;
                     }
                 }
 
+                // for wireless, the first one wins
                 for (let i = 0; i < this._sections.wifi.services.length; i++) {
-                    let service = this._sections.wifi.services[i];
+                    let obj = this._sections.wifi.services[i];
 
-                    if (service.state == 'online') {
-                        this.setIcon(getIconForSignal(service.strength));
+                    if (obj.service.state == 'online') {
+                        log('online wifi network "' + obj.service.name +  '", strength: ' + obj.service.strength);
+                        this.setIcon(getIconForSignal(obj.service.strength));
                         return;
                     }
                 }
