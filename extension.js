@@ -21,7 +21,14 @@ const _ = Gettext.gettext;
 
 const N_VISIBLE_NETWORKS = 5;
 
-// DBus interface
+// DBus interfaces
+const DBusInterface = {
+    name: 'org.freedesktop.DBus',
+    signals: [
+        { name: 'NameOwnerChanged', inSignature: 'sss', outSignature: '' },
+    ],
+};
+
 const CMManagerInterface = {
     name: 'net.connman.Manager',
     methods: [
@@ -64,6 +71,7 @@ const CMTechnologyInterface = {
     ],
 };
 
+const DBusProxy = DBus.makeProxyClass(DBusInterface);
 const CMManagerProxy = DBus.makeProxyClass(CMManagerInterface);
 const CMServiceProxy = DBus.makeProxyClass(CMServiceInterface);
 const CMTechnologyProxy = DBus.makeProxyClass(CMTechnologyInterface);
@@ -596,6 +604,9 @@ CMApplet.prototype = {
     _init: function() {
         PanelMenu.SystemStatusButton.prototype._init.call(this, 'network-error');
 
+        this._bus_proxy = new DBusProxy(DBus.system, 'org.freedesktop.DBus', '/org/freedesktop/DBus');
+        this._bus_proxy.connect('NameOwnerChanged', Lang.bind(this, this._nameOwnerChanged));
+
         this._connman_proxy = new CMManagerProxy(DBus.system, 'net.connman', '/');
 
         this._services = [ ];
@@ -644,6 +655,29 @@ CMApplet.prototype = {
         this.actor.visible = true;
     },
 
+    _setHasDaemon: function(hasDaemon) {
+        if (this._hasDaemon == hasDaemon)
+            return;
+
+        this._hasDaemon = hasDaemon;
+
+        this._sections.wired.section.actor.visible = this._hasDaemon;
+        this._sections.wifi.section.actor.visible = this._hasDaemon;
+        this._updateIcon();
+    },
+
+    _nameOwnerChanged: function(emitter, name, old_owner, new_owner) {
+        if (name != 'net.connman')
+            return;
+
+        if (!new_owner) {
+            this._setHasDaemon(false);
+        }
+        else {
+            this._setHasDaemon(true);
+        }
+    },
+
     _updateAvailableTechnologies: function(technologies) {
         this._sections.wired.available = false;
         this._sections.wifi.available = false;
@@ -687,8 +721,11 @@ CMApplet.prototype = {
     _getProperties: function(res, err) {
         if (err) {
             log('Unable to get net.connman.Manager properties: ' + err);
+            this._setHasDaemon(false);
             return;
         }
+
+        this._setHasDaemon(true);
 
         if (res['AvailableTechnologies']) {
             let availableTech = res['AvailableTechnologies'];
@@ -706,11 +743,15 @@ CMApplet.prototype = {
     _getServices: function(res, err) {
         if (err) {
             log('Unable to get services: ' + err);
+            this._setHasDaemon(false);
         }
         else if (res) {
+            this._setHasDaemon(true);
+
             this._sections.wired.item.section.removeAll();
             this._sections.wifi.item.section.removeAll();
 
+            // disconnect all signal handlers
             for (let i = 0; i < this._services.length; i++) {
                 let obj = this._services[i];
 
@@ -791,12 +832,12 @@ CMApplet.prototype = {
     _getState: function(new_state, err) {
         if (err) {
             log('Unable to get net.connman.Manager state: ' + err);
+            this._setHasDaemon(false);
             return;
         }
 
-        //log('New state (GetState): ' + new_state);
         this._state = new_state;
-        this._updateIcon();
+        this._setHasDaemon(true); // this will call updateIcon()
     },
 
     _propertyChanged: function(emitter, name, value) {
@@ -826,6 +867,11 @@ CMApplet.prototype = {
     },
 
     _updateIcon: function() {
+        if (!this._hasDaemon) {
+            this.setIcon('network-offline');
+            return;
+        }
+
         for (let i = 0; i < this._services.length; i++) {
             let obj = this._services[i];
 
