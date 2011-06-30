@@ -90,7 +90,7 @@ CMService.prototype = {
         if (props)
             this._props = props;
         else {
-            log('Requesting properties for service: ' + this._object_path);
+            //log('Requesting properties for service: ' + this._object_path);
             this._props = { };
             this._proxy.GetPropertiesRemote(Lang.bind(this, this._updateProperties));
         }
@@ -104,13 +104,13 @@ CMService.prototype = {
             return;
         }
 
-        log('Updating properties for service: ' + this._object_path);
+        //log('Updating properties for service: ' + this._object_path);
         this._props = res;
         this.emit('changed');
     },
 
     _propertyChanged: function(emitter, name, value) {
-        log('Service property "' + name + '" changed to: ' + value);
+        //log('Service property "' + name + '" changed to: ' + value);
         this._props[name] = value;
         this.emit('changed');
     },
@@ -248,7 +248,7 @@ CMTechnologyTitleMenuItem.prototype = {
 
     addServiceItem: function(item, overflow) {
         if (overflow) {
-            log('Adding overflow sub-menu for ' + this._description.text);
+            //log('Adding overflow sub-menu for ' + this._description.text);
             if (!this._overflowMenu) {
                 this._overflowMenu = new PopupMenu.PopupSubMenuMenuItem(_("More..."));
                 this.section.addMenuItem(this._overflowMenu);
@@ -553,12 +553,12 @@ CMApplet.prototype = {
                 obj.item = new CMServiceMenuItem(obj.service);
 
                 if (obj.service.type == 'wired') {
-                    log('Adding "' + obj.service.name + '" to the wired services');
+                    //log('Adding "' + obj.service.name + '" to the wired services');
                     this._sections.wired.services.push(obj);
                 }
 
                 if (obj.service.type == 'wifi') {
-                    log('Adding "' + obj.service.name + '" to the wifi services');
+                    //log('Adding "' + obj.service.name + '" to the wifi services');
                     this._sections.wifi.services.push(obj);
                 }
             }
@@ -601,13 +601,13 @@ CMApplet.prototype = {
             return;
         }
 
-        log('New state (GetState): ' + new_state);
+        //log('New state (GetState): ' + new_state);
         this._state = new_state;
         this._updateIcon();
     },
 
     _propertyChanged: function(emitter, name, value) {
-        log('Manager property "' + name + '" changed to: ' + value);
+        //log('Manager property "' + name + '" changed to: ' + value);
 
         if (name == 'AvailableTechnologies') {
             this._updateAvailableTechnologies(value);
@@ -625,7 +625,7 @@ CMApplet.prototype = {
         }
 
         if (name == 'State') {
-            log('New state (PropertyChanged): ' + value);
+            //log('New state (PropertyChanged): ' + value);
             this._state = value;
         }
 
@@ -640,7 +640,7 @@ CMApplet.prototype = {
                     let obj = this._sections.wired.services[i];
 
                     if (obj.service.state == 'online') {
-                        log('online wired network');
+                        //log('online wired network');
                         this.setIcon('network-wired');
                         return;
                     }
@@ -651,7 +651,7 @@ CMApplet.prototype = {
                     let obj = this._sections.wifi.services[i];
 
                     if (obj.service.state == 'online') {
-                        log('online wifi network "' + obj.service.name +  '", strength: ' + obj.service.strength);
+                        //log('online wifi network "' + obj.service.name +  '", strength: ' + obj.service.strength);
                         this.setIcon(getIconForSignal(obj.service.strength));
                         return;
                     }
