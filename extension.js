@@ -764,6 +764,13 @@ CMApplet.prototype = {
 
             if (this._sections.wifi.services) {
                 this._sections.wifi.services.sort(function(one, two) {
+                    // online services take the precedence
+                    if (one.service.state == 'online')
+                        return -1;
+
+                    if (two.service.state == 'online')
+                        return 1;
+
                     return two.service.strength - one.service.strength;
                 });
 
