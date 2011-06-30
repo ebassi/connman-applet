@@ -598,6 +598,8 @@ CMApplet.prototype = {
 
         this._connman_proxy = new CMManagerProxy(DBus.system, 'net.connman', '/');
 
+        this._services = [ ];
+
         // the various sections of the menu
         this._sections = { };
 
@@ -709,8 +711,15 @@ CMApplet.prototype = {
             this._sections.wired.item.section.removeAll();
             this._sections.wifi.item.section.removeAll();
 
+            for (let i = 0; i < this._services.length; i++) {
+                let obj = this._services[i];
+
+                obj.service.disconnect(obj.changedId);
+            }
+
             this._sections.wired.services = [ ];
             this._sections.wifi.services = [ ];
+            this._services = [ ];
 
             for (let i = 0; i < res.length; i++) {
                 let [objPath, objProps] = res[i];
@@ -722,6 +731,10 @@ CMApplet.prototype = {
 
                 obj.item = new CMServiceMenuItem(obj.service);
 
+                obj.changedId = obj.service.connect('changed', Lang.bind(this, function() {
+                    this._updateIcon();
+                }));
+
                 if (obj.service.type == 'wired') {
                     //log('Adding "' + obj.service.name + '" to the wired services');
                     this._sections.wired.services.push(obj);
@@ -731,6 +744,8 @@ CMApplet.prototype = {
                     //log('Adding "' + obj.service.name + '" to the wifi services');
                     this._sections.wifi.services.push(obj);
                 }
+
+                this._services.push(obj);
             }
 
             if (this._sections.wired.services) {
@@ -740,6 +755,7 @@ CMApplet.prototype = {
                     this._sections.wired.item.addServiceItem(obj.item);
                 }
 
+                // hide the wired connections if we only have 1
                 if (this._sections.wired.services.length > 1)
                     this._sections.wired.item.section.actor.show();
                 else
@@ -754,7 +770,7 @@ CMApplet.prototype = {
                 for (let i = 0; i < this._sections.wifi.services.length; i++) {
                     let obj = this._sections.wifi.services[i];
 
-                    if (i > N_VISIBLE_NETWORKS)
+                    if (i >= N_VISIBLE_NETWORKS)
                         this._sections.wifi.item.addServiceItem(obj.item, true);
                     else
                         this._sections.wifi.item.addServiceItem(obj.item, false);
@@ -795,7 +811,7 @@ CMApplet.prototype = {
         }
 
         if (name == 'State') {
-            //log('New state (PropertyChanged): ' + value);
+            log('New state (PropertyChanged): ' + value);
             this._state = value;
         }
 
@@ -803,34 +819,36 @@ CMApplet.prototype = {
     },
 
     _updateIcon: function() {
-        if (this._state == 'online') {
-            if (this._sections.wired.services) {
-                // online wired connections always win
-                for (let i = 0; i < this._sections.wired.services.length; i++) {
-                    let obj = this._sections.wired.services[i];
+        for (let i = 0; i < this._services.length; i++) {
+            let obj = this._services[i];
 
-                    if (obj.service.state == 'online') {
-                        //log('online wired network');
-                        this.setIcon('network-wired');
-                        return;
-                    }
+            // online wired connections always win
+            if (obj.service.type == 'ethernet' &&
+                obj.service.state == 'online') {
+                this.setIcon('network-wired');
+                return;
+            }
+
+            // the first online/associating wifi service, wins
+            if (obj.service.type == 'wifi') {
+                if (obj.service.state == 'idle')
+                    continue;
+
+                if (obj.service.state == 'online') {
+                    this.setIcon(getIconForSignal(obj.service.strength));
+                    return;
                 }
-
-                // for wireless, the first one wins
-                for (let i = 0; i < this._sections.wifi.services.length; i++) {
-                    let obj = this._sections.wifi.services[i];
-
-                    if (obj.service.state == 'online') {
-                        //log('online wifi network "' + obj.service.name +  '", strength: ' + obj.service.strength);
-                        this.setIcon(getIconForSignal(obj.service.strength));
-                        return;
-                    }
+                else if (obj.service.state == 'association' ||
+                         obj.service.state == 'configuration' ||
+                         obj.service.state == 'ready') {
+                    this.setIcon('network-wireless-acquiring');
+                    return;
                 }
             }
         }
-        else {
-            this.setIcon('network-offline');
-        }
+
+        // if we got here then we don't have any online connection
+        this.setIcon('network-offline');
     },
 };
 
