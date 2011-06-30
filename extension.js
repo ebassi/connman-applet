@@ -143,6 +143,15 @@ CMService.prototype = {
         }));
     },
 
+    unsetPassphrase: function() {
+        this._props['Passphrase'] = null;
+        this._proxy.ClearPropertyRemote('Passphrase', Lang.bind(this, function(err) {
+            if (err) {
+                log('Unable to unset the passphrase for connection "' + this.name + '"');
+            }
+        }));
+    },
+
     get path() {
         return this._object_path;
     },
@@ -264,6 +273,9 @@ CMAuthenticationDialog.prototype = {
             this._emitDone(false, false);
         }));
         this._service.connect('connection-failed', Lang.bind(this, function(error) {
+            // unset the stored password
+            this._service.unsetPassphrase();
+
             this._passwordBox.hide();
             this._errorMessageLabel.text = error;
             this._errorMessageLabel.show();
