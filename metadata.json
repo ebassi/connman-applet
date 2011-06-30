@@ -1,1 +1,9 @@
-{"shell-version": ["3.0.2"], "uuid": "connman-applet@connman.net", "name": "ConnMan", "description": "ConnMan applet"}
+{
+  "shell-version": ["3.0.2"],
+  "uuid": "connman-applet@connman.net",
+  "name": "ConnMan",
+  "description": "Control and display network connections using ConnMan ",
+  "version": "0.0.1"
+  "author": "Emmanuele Bassi <ebassi@linux.intel.com>",
+  "copyright": "Copyright © 2011  Intel Corporation"
+}

@@ -905,6 +905,7 @@ CMApplet.prototype = {
     },
 };
 
-function main() {
+function main(metadata) {
+    log('Starting ConnMan extension - version: ' + metadata.version);
     Panel.STANDARD_TRAY_ICON_SHELL_IMPLEMENTATION['network'] = CMApplet;
 }
