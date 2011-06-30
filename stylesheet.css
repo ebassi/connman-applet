@@ -42,3 +42,9 @@
     color: black;
     border-radius: 5px;
 }
+
+.cm-dialog-error-label {
+    font-size: 10pt;
+    color: #ffff00;
+    padding-bottom: 8px;
+}

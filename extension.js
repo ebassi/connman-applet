@@ -44,6 +44,8 @@ const CMServiceInterface = {
         { name: 'GetProperties', inSignature: '', outSignature: 'a{sv}' },
         { name: 'SetProperty', inSignature: 'sv', outSignature: '' },
         { name: 'ClearProperty', inSignature: 's', outSignature: '' },
+        // set an unusually long timeout because the Connect method
+        // will not return until success or error
         { name: 'Connect', inSignature: '', outSignature: '', timeout: 120000 },
         { name: 'Disconnect', inSignature: '', outSignature: '' },
     ],
@@ -212,7 +214,9 @@ CMService.prototype = {
     },
 
     connectService: function() {
-        if (this.passphraseRequired && this.passphrase == null) {
+        if (!this.isImmutable &&
+             this.passphraseRequired &&
+             this.passphrase == null) {
             this._connectionDialog = new CMAuthenticationDialog(this);
             this._connectionDialog.connect('done', Lang.bind(this, this._onDialogDone));
 
@@ -223,8 +227,6 @@ CMService.prototype = {
             return;
         }
 
-        // set an unusually long timeout because the Connect method
-        // will not return until success or error
         this._proxy.ConnectRemote(Lang.bind(this, function(error) {
             if (error) {
                 log('Unable to connect: ' + error);
@@ -261,7 +263,10 @@ CMAuthenticationDialog.prototype = {
         this._service.connect('connected', Lang.bind(this, function() {
             this._emitDone(false, false);
         }));
-        this._service.connect('connection-failed', Lang.bind(this, function() {
+        this._service.connect('connection-failed', Lang.bind(this, function(error) {
+            this._passwordBox.hide();
+            this._errorMessageLabel.text = error;
+            this._errorMessageLabel.show();
             this._emitDone(true, false);
         }));
 
@@ -302,6 +307,12 @@ CMAuthenticationDialog.prototype = {
         this._passwordEntry.clutter_text.connect('activate', Lang.bind(this, this._onEntryActivate));
         this._passwordEntry.clutter_text.set_password_char('\u25cf'); // ● U+25CF BLACK CIRCLE
         this._passwordBox.add(this._passwordEntry, { expand: true });
+
+        this._errorMessageLabel = new St.Label({ style_class: 'cm-dialog-error-label' });
+        this._errorMessageLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        this._errorMessageLabel.clutter_text.line_wrap = true;
+        messageBox.add(this._errorMessageLabel);
+        this._errorMessageLabel.hide();
 
         this.setButtons([
             {
