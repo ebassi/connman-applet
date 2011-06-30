@@ -1,12 +1,16 @@
 // global imports
+const Clutter = imports.gi.Clutter;
 const DBus = imports.dbus;
 const GLib = imports.gi.GLib;
 const Lang = imports.lang;
+const Mainloop = imports.mainloop;
+const Pango = imports.gi.Pango;
 const Shell = imports.gi.Shell;
 const Signals = imports.signals;
 const St = imports.gi.St;
 
 // shell imports
+const ModalDialog = imports.ui.modalDialog;
 const Panel = imports.ui.panel;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
@@ -129,7 +133,12 @@ CMService.prototype = {
         // this won't emit the PropertyChange signal so we need to change
         // the _props dict ourselves
         this._props['Passphrase'] = passphrase;
-        this._proxt.SetPropertyRemote('Passphrase', this._props['Passphrase']);
+        this._proxy.SetPropertyRemote('Passphrase', this._props['Passphrase'],
+                                      Lang.bind(this, function(err) {
+            if (err) {
+                log('Unable to set the passphrase for connection "' + this.name + '"');
+            }
+        }));
     },
 
     get path() {
@@ -184,14 +193,45 @@ CMService.prototype = {
         return this._getProperty('Passphrase');
     },
 
+    _onDialogDone: function(dialog, keepVisible, wasDismissed) {
+        if (this._dialogIsCompleting)
+            return;
+
+        this._dialogIsCompleting = true;
+
+        if (keepVisible) {
+            Mainloop.timeout_add(2000, Lang.bind(this, function() {
+                this._connectionDialog.close();
+                this._connectionDialog = null;
+            }));
+        }
+        else {
+            this._connectionDialog.close();
+            this._connectionDialog = null;
+        }
+    },
+
     connectService: function() {
+        if (this.passphraseRequired && this.passphrase == null) {
+            this._connectionDialog = new CMAuthenticationDialog(this);
+            this._connectionDialog.connect('done', Lang.bind(this, this._onDialogDone));
+
+            this._dialogIsCompleting = false;
+
+            this._connectionDialog.open();
+
+            return;
+        }
+
         // set an unusually long timeout because the Connect method
         // will not return until success or error
         this._proxy.ConnectRemote(Lang.bind(this, function(error) {
-            if (error)
+            if (error) {
                 log('Unable to connect: ' + error);
+                this.emit('connection-failed', error);
+            }
             else
-                this.emit('changed');
+                this.emit('connected');
         }));
     },
 
@@ -200,11 +240,118 @@ CMService.prototype = {
             if (error)
                 log('Unable to disconnect: ' + error);
             else
-                this.emit('changed');
+                this.emit('disconnected');
         }));
     },
 };
 Signals.addSignalMethods(CMService.prototype);
+
+function CMAuthenticationDialog(service) {
+    this._init(service);
+}
+
+CMAuthenticationDialog.prototype = {
+    __proto__: ModalDialog.ModalDialog.prototype,
+
+    _init: function(service) {
+        ModalDialog.ModalDialog.prototype._init.call(this);
+
+        this._service = service;
+
+        this._service.connect('connected', Lang.bind(this, function() {
+            this._emitDone(false, false);
+        }));
+        this._service.connect('connection-failed', Lang.bind(this, function() {
+            this._emitDone(true, false);
+        }));
+
+        let message = _("The wifi network '" + service.name + "' requires a password to access it");
+
+        let mainContentBox = new St.BoxLayout({ style_class: 'cm-dialog-main-layout',
+                                                vertical: false });
+        this.contentLayout.add(mainContentBox, { x_fill: true, y_fill: true });
+
+        let icon = new St.Icon({ icon_name: 'dialog-password-symbolic' });
+        mainContentBox.add(icon, { x_fill: true,
+                                   y_fill: false,
+                                   x_align: St.Align.END,
+                                   y_align: St.Align.START });
+
+        let messageBox = new St.BoxLayout({ style_class: 'cm-dialog-message-layout',
+                                            vertical: true });
+        mainContentBox.add(messageBox, { y_align: St.Align.START });
+
+        this._subjectLabel = new St.Label({ style_class: 'cm-dialog-headline',
+                                            text: _("Authentication Required") });
+        messageBox.add(this._subjectLabel, { y_fill: false, y_align: St.Align.START });
+
+        this._descriptionLabel = new St.Label({ style_class: 'cm-dialog-description',
+                                                text: message });
+        this._descriptionLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        this._descriptionLabel.clutter_text.line_wrap = true;
+        messageBox.add(this._descriptionLabel, { y_fill: true, y_align: St.Align.START });
+
+        this._passwordBox = new St.BoxLayout({ vertical: false });
+        messageBox.add(this._passwordBox);
+
+        this._passwordLabel = new St.Label({ style_class: 'cm-dialog-password-label' });
+        this._passwordBox.add(this._passwordLabel);
+        this._passwordEntry = new St.Entry({ style_class: 'cm-dialog-password-entry',
+                                             text: '',
+                                             can_focus: true });
+        this._passwordEntry.clutter_text.connect('activate', Lang.bind(this, this._onEntryActivate));
+        this._passwordEntry.clutter_text.set_password_char('\u25cf'); // ● U+25CF BLACK CIRCLE
+        this._passwordBox.add(this._passwordEntry, { expand: true });
+
+        this.setButtons([
+            {
+                label: _("Cancel"),
+                action: Lang.bind(this, this.cancel),
+                key: Clutter.Escape,
+            },
+            {
+                label: _("Connect"),
+                action: Lang.bind(this, this._onConnectButtonPressed),
+            },
+        ]);
+
+        this._doneEmitted = false;
+
+        this.connect('opened', Lang.bind(this, function() {
+            this._passwordEntry.grab_key_focus();
+        }));
+    },
+
+    cancel: function() {
+        this._wasDismissed = true;
+        this.close(global.get_current_time());
+        this._emitDone(false, true);
+    },
+
+    _emitDone: function(keepVisible, wasDismissed) {
+        if (!this._doneEmitted) {
+            this._doneEmitted = true;
+            this.emit('done', keepVisible, wasDismissed);
+        }
+    },
+
+    _onEntryActivate: function() {
+        let passphrase = this._passwordEntry.get_text();
+
+        // set the passphrase
+        this._service.setPassphrase(passphrase);
+
+        // connect
+        this._service.connectService();
+    },
+
+    _onConnectButtonPressed: function() {
+        this._onEntryActivate();
+    },
+
+    
+};
+Signals.addSignalMethods(CMAuthenticationDialog.prototype);
 
 function CMTechnologyTitleMenuItem(name, technology) {
     log('Attempting to use the abstract CMTechnologyTitleMenuItem');
@@ -372,7 +519,7 @@ CMServiceMenuItem.prototype = {
     },
 
     _serviceChanged: function() {
-        if (service.type == 'online')
+        if (this.service.type == 'wifi')
             this._icons.visible = true;
         else
             this._icons.visible = false;

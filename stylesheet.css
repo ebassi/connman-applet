@@ -3,3 +3,42 @@
 .cm-menu-item-icons {
     spacing: .5em;
 }
+
+.cm-dialog {
+    /* this is the width of the entire modal popup */
+    width: 500px;
+}
+
+.cm-dialog-main-layout {
+    spacing: 24px;
+    padding: 10px;
+}
+
+.cm-dialog-message-layout {
+    spacing: 16px;
+}
+
+.cm-dialog-headline {
+    font-size: 12pt;
+    font-weight: bold;
+    color: #666666;
+}
+
+.cm-dialog-description {
+    font-size: 10pt;
+    color: white;
+}
+
+.cm-dialog-password-label:ltr {
+    padding-right: 0.5em;
+}
+
+.cm-dialog-password-label:rtl {
+    padding-left: 0.5em;
+}
+
+.cm-dialog-password-entry {
+    background-color: white;
+    color: black;
+    border-radius: 5px;
+}
