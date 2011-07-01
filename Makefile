@@ -1,17 +1,28 @@
 UUID=connman-applet@connman.net
+VERSION=0.0.1
 TARGET_DIR=share/gnome-shell/extensions/${UUID}
 
-all:
-	@echo Nothing to do, try "make install-local" or "make install".
+SED=$(shell which sed)
 
-install-local:
+metadata:
+	@${SED} -e 's|@VERSION@|${VERSION}|' 	\
+		-e 's|@UUID@|${UUID}|'		\
+	< metadata.json.in \
+	> metadata.json
+
+all: metadata
+
+clean:
+	@rm -f metadata.json
+
+install-local: all
 	@mkdir --parents ${HOME}/.local/${TARGET_DIR}
 	@cp extension.js metadata.json stylesheet.css ${HOME}/.local/${TARGET_DIR}
 
-install:
+install: all
 	@mkdir --parents ${DESTDIR}/usr/share/${TARGET_DIR}
 	@cp extension.js metadata.json stylesheet.css ${DESTDIR}/usr/share/${TARGET_DIR}
 
-dist:
+dist: all
 	git archive --format=tar --prefix=connman-applet-$(shell git describe)/ HEAD | \
 	bzip2 > connman-applet-$(shell git describe).tar.bz2
