@@ -878,8 +878,6 @@ CMApplet.prototype = {
         for (let i = 0; i < this._sections.wired.services.length; i++) {
             let obj = this._sections.wired.services[i];
 
-            log('Wired service ' + obj.service.name + ' state: ' + obj.service.state);
-
             if (obj.service.state == 'ready') {
                 this.setIcon('network-wired');
                 return;
