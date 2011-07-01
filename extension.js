@@ -738,6 +738,8 @@ CMApplet.prototype = {
 
             this._updateEnabledTechnologies(enabledTech);
         }
+
+        this._updateIcon();
     },
 
     _getServices: function(res, err) {
@@ -776,7 +778,7 @@ CMApplet.prototype = {
                     this._updateIcon();
                 }));
 
-                if (obj.service.type == 'wired') {
+                if (obj.service.type == 'ethernet') {
                     //log('Adding "' + obj.service.name + '" to the wired services');
                     this._sections.wired.services.push(obj);
                 }
@@ -824,9 +826,9 @@ CMApplet.prototype = {
                         this._sections.wifi.item.addServiceItem(obj.item, false);
                 }
             }
-        }
 
-        this._updateIcon();
+            this._updateIcon();
+        }
     },
 
     _getState: function(new_state, err) {
@@ -872,31 +874,34 @@ CMApplet.prototype = {
             return;
         }
 
-        for (let i = 0; i < this._services.length; i++) {
-            let obj = this._services[i];
+        // online wired connections always win
+        for (let i = 0; i < this._sections.wired.services.length; i++) {
+            let obj = this._sections.wired.services[i];
 
-            // online wired connections always win
-            if (obj.service.type == 'ethernet' &&
-                obj.service.state == 'online') {
+            log('Wired service ' + obj.service.name + ' state: ' + obj.service.state);
+
+            if (obj.service.state == 'ready') {
                 this.setIcon('network-wired');
                 return;
             }
+        }
 
-            // the first online/associating wifi service, wins
-            if (obj.service.type == 'wifi') {
-                if (obj.service.state == 'idle')
-                    continue;
+        for (let i = 0; i < this._sections.wifi.services.length; i++) {
+            let obj = this._sections.wifi.services[i];
 
-                if (obj.service.state == 'online') {
-                    this.setIcon(getIconForSignal(obj.service.strength));
-                    return;
-                }
-                else if (obj.service.state == 'association' ||
-                         obj.service.state == 'configuration' ||
-                         obj.service.state == 'ready') {
-                    this.setIcon('network-wireless-acquiring');
-                    return;
-                }
+            if (obj.service.state == 'idle')
+                continue;
+
+            // the first online wifi wins
+            if (obj.service.state == 'online') {
+                this.setIcon(getIconForSignal(obj.service.strength));
+                return;
+            }
+            else if (obj.service.state == 'association' ||
+                     obj.service.state == 'configuration' ||
+                     obj.service.state == 'ready') {
+                this.setIcon('network-wireless-acquiring');
+                return;
             }
         }
 
