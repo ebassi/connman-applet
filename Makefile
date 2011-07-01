@@ -23,6 +23,9 @@ install: all
 	@mkdir --parents ${DESTDIR}/usr/share/${TARGET_DIR}
 	@cp extension.js metadata.json stylesheet.css ${DESTDIR}/usr/share/${TARGET_DIR}
 
+tag:
+	@git tag -s -m "ConnMan Extension ${VERSION} (release)" ${VERSION}
+
 dist: all
-	git archive --format=tar --prefix=connman-applet-$(shell git describe)/ HEAD | \
+	@git archive --format=tar --prefix=connman-applet-$(shell git describe)/ HEAD | \
 	bzip2 > connman-applet-$(shell git describe).tar.bz2
