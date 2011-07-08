@@ -743,26 +743,28 @@ CMApplet.prototype = {
     },
 
     _getServices: function(res, err) {
-        if (err) {
-            log('Unable to get services: ' + err);
-            this._setHasDaemon(false);
+        this._sections.wired.item.section.removeAll();
+        this._sections.wifi.item.section.removeAll();
+
+        // disconnect all signal handlers
+        for (let i = 0; i < this._services.length; i++) {
+            let obj = this._services[i];
+
+            obj.service.disconnect(obj.changedId);
         }
-        else if (res) {
+
+        this._sections.wired.services = [ ];
+        this._sections.wifi.services = [ ];
+        this._services = [ ];
+
+        if (err) {
+            this._setHasDaemon(false);
+            log('Unable to get services: ' + err);
+            return;
+        }
+
+        if (res) {
             this._setHasDaemon(true);
-
-            this._sections.wired.item.section.removeAll();
-            this._sections.wifi.item.section.removeAll();
-
-            // disconnect all signal handlers
-            for (let i = 0; i < this._services.length; i++) {
-                let obj = this._services[i];
-
-                obj.service.disconnect(obj.changedId);
-            }
-
-            this._sections.wired.services = [ ];
-            this._sections.wifi.services = [ ];
-            this._services = [ ];
 
             for (let i = 0; i < res.length; i++) {
                 let [objPath, objProps] = res[i];
@@ -790,45 +792,42 @@ CMApplet.prototype = {
 
                 this._services.push(obj);
             }
-
-            if (this._sections.wired.services) {
-                for (let i = 0; i < this._sections.wired.services.length; i++) {
-                    let obj = this._sections.wired.services[i];
-
-                    this._sections.wired.item.addServiceItem(obj.item);
-                }
-
-                // hide the wired connections if we only have 1
-                if (this._sections.wired.services.length > 1)
-                    this._sections.wired.item.section.actor.show();
-                else
-                    this._sections.wired.item.section.actor.hide();
-            }
-
-            if (this._sections.wifi.services) {
-                this._sections.wifi.services.sort(function(one, two) {
-                    // online services take the precedence
-                    if (one.service.state == 'online')
-                        return -1;
-
-                    if (two.service.state == 'online')
-                        return 1;
-
-                    return two.service.strength - one.service.strength;
-                });
-
-                for (let i = 0; i < this._sections.wifi.services.length; i++) {
-                    let obj = this._sections.wifi.services[i];
-
-                    if (i >= N_VISIBLE_NETWORKS)
-                        this._sections.wifi.item.addServiceItem(obj.item, true);
-                    else
-                        this._sections.wifi.item.addServiceItem(obj.item, false);
-                }
-            }
-
-            this._updateIcon();
         }
+
+        for (let i = 0; i < this._sections.wired.services.length; i++) {
+            let obj = this._sections.wired.services[i];
+
+            this._sections.wired.item.addServiceItem(obj.item);
+        }
+
+        // hide the wired connections if we only have 1
+        if (this._sections.wired.services.length > 1)
+            this._sections.wired.item.section.actor.show();
+        else
+            this._sections.wired.item.section.actor.hide();
+        }
+
+        this._sections.wifi.services.sort(function(one, two) {
+            // online services take the precedence
+            if (one.service.state == 'online')
+                return -1;
+
+            if (two.service.state == 'online')
+                return 1;
+
+            return two.service.strength - one.service.strength;
+        });
+
+        for (let i = 0; i < this._sections.wifi.services.length; i++) {
+            let obj = this._sections.wifi.services[i];
+
+            if (i >= N_VISIBLE_NETWORKS)
+                this._sections.wifi.item.addServiceItem(obj.item, true);
+            else
+                this._sections.wifi.item.addServiceItem(obj.item, false);
+        }
+
+        this._updateIcon();
     },
 
     _getState: function(new_state, err) {
