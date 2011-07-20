@@ -877,7 +877,8 @@ CMApplet.prototype = {
         for (let i = 0; i < this._sections.wired.services.length; i++) {
             let obj = this._sections.wired.services[i];
 
-            if (obj.service.state == 'ready') {
+            if (obj.service.state == 'ready' ||
+                obj.service.state == 'online') {
                 this.setIcon('network-wired');
                 return;
             }
