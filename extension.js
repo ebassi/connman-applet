@@ -805,7 +805,6 @@ CMApplet.prototype = {
             this._sections.wired.item.section.actor.show();
         else
             this._sections.wired.item.section.actor.hide();
-        }
 
         this._sections.wifi.services.sort(function(one, two) {
             // online services take the precedence
