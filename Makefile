@@ -1,5 +1,5 @@
 UUID=connman-applet@connman.net
-VERSION=0.0.8
+VERSION=0.0.9
 TARGET_DIR=share/gnome-shell/extensions/${UUID}
 
 SED=$(shell which sed)
